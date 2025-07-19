@@ -1,10 +1,10 @@
 import os
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import aiohttp
 import asyncio
 from dotenv import load_dotenv
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime
 import pytz
 
 # Load environment variables
@@ -19,27 +19,34 @@ intents.message_content = True
 intents.dm_messages = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# To track daily sent memes and current batch + session control
-daily_meme_urls = set()
-daily_meme_date = None
-
+sent_memes_today = set()
 current_batch = []
 current_ctx = None
 current_wait_task = None
+current_subreddit = None
 
 async def reset_daily_memes():
-    global daily_meme_urls, daily_meme_date
+    global sent_memes_today
     tz = pytz.timezone('Europe/Paris')
-    today = datetime.now(tz).date()
-    if daily_meme_date != today:
-        daily_meme_urls.clear()
-        daily_meme_date = today
+    now = datetime.now(tz)
+    if now.hour == 0 and now.minute < 5:
+        sent_memes_today = set()
+
+async def fetch_unique_memes(batch_size=5, subreddit=None):
+    memes = []
+    tries = 0
+    while len(memes) < batch_size and tries < batch_size * 4:
+        meme = await fetch_meme_from_api(subreddit=subreddit)
+        if meme and meme['post_link'] not in sent_memes_today:
+            sent_memes_today.add(meme['post_link'])
+            memes.append(meme)
+        tries += 1
+    return memes
 
 async def fetch_meme_from_api(subreddit=None):
     url = "https://meme-api.com/gimme"
     if subreddit:
         url += f"/{subreddit}"
-
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             if resp.status != 200:
@@ -52,88 +59,59 @@ async def fetch_meme_from_api(subreddit=None):
             }
             return meme_data
 
-async def fetch_unique_memes(batch_size=5, subreddit=None):
-    memes = []
-    attempts = 0
-    max_attempts = batch_size * 5
-    while len(memes) < batch_size and attempts < max_attempts:
-        meme = await fetch_meme_from_api(subreddit)
-        attempts += 1
-        if meme and meme["url"] not in daily_meme_urls and meme["url"] not in [m["url"] for m in memes]:
-            memes.append(meme)
-    return memes
-
-async def send_batch_for_validation(memes, ctx):
-    global current_wait_task, current_batch, current_ctx
-
-    current_batch = memes
-    current_ctx = ctx
-
-    msg_text = "**Alright mate, here are some memes for you!** 🧙‍♂️\n"
-    for i, meme in enumerate(memes, start=1):
-        msg_text += f"**{i}. {meme['title']}**\n{meme['url']}\n\n"
-    msg_text += (
-        "Reply with `yes <number>` to post a meme, or `no` to discard and get a new batch.\n"
-        "Or use `!stop` to cancel this session."
-    )
-    await ctx.send(msg_text)
-
-    def check(m):
-        return (
-            m.author.id == OWNER_ID and
-            m.channel == ctx.channel and
-            (m.content.lower().startswith("yes") or m.content.lower() == "no")
-        )
-
-    async def wait_for_reply():
-        try:
-            reply = await bot.wait_for("message", check=check, timeout=3600)
-            content = reply.content.lower()
-
-            if content == "no":
-                await ctx.send("Okay, discarding these memes and fetching a new batch...")
-                await start_fetching_session(ctx)
-                return
-
-            elif content.startswith("yes"):
-                parts = content.split()
-                if len(parts) == 2 and parts[1].isdigit():
-                    idx = int(parts[1]) - 1
-                    if 0 <= idx < len(current_batch):
-                        selected = current_batch[idx]
-                        daily_meme_urls.add(selected["url"])
-                        channel = bot.get_channel(MEME_CHANNEL_ID)
-                        # Post clean meme with Ron flavor text
-                        await channel.send(
-                            f"Here's one from your pal Ron Weasley: **{selected['title']}**\n"
-                            f"{selected['url']}\n"
-                            "*Mischief managed! 🔥*"
-                        )
-                        await ctx.send("✅ Meme published! Session ended.")
-                        # Clear current batch/session
-                        clear_session()
-                        return
-                await ctx.send("Invalid number, please reply `yes <number>` with a valid meme number.")
-                await wait_for_reply()
-            else:
-                await ctx.send("Please reply with `yes <number>` or `no`.")
-                await wait_for_reply()
-
-        except asyncio.TimeoutError:
-            await ctx.send("⌛ No response in time, session ended and memes discarded.")
-            clear_session()
-
-    current_wait_task = asyncio.create_task(wait_for_reply())
-
 def clear_session():
-    global current_batch, current_ctx, current_wait_task
+    global current_batch, current_ctx, current_wait_task, current_subreddit
     current_batch = []
     current_ctx = None
+    current_subreddit = None
     if current_wait_task and not current_wait_task.done():
         current_wait_task.cancel()
     current_wait_task = None
 
+async def send_batch_for_validation(memes, ctx):
+    global current_batch, current_ctx, current_wait_task
+    current_batch = memes
+    current_ctx = ctx
+    desc = ""
+    for idx, meme in enumerate(memes, start=1):
+        desc += f"**{idx}. {meme['title']}**\n{meme['url']}\n\n"
+    await ctx.send(f"Here are some memes for today!\nReply `yes <number>` to post, `no` for new batch, or `!stop` to cancel.\n\n{desc}")
+
+    def check(m):
+        return m.author.id == OWNER_ID and m.channel == ctx.channel
+
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=3600)
+        content = msg.content.lower().strip()
+        if content.startswith("yes"):
+            parts = content.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                choice = int(parts[1])
+                if 1 <= choice <= len(memes):
+                    meme = memes[choice - 1]
+                    channel = bot.get_channel(MEME_CHANNEL_ID)
+                    await channel.send(f"**{meme['title']}**\n{meme['url']}\n\n*Blimey, another meme for the common room!* 🧙‍♂️")
+                    await ctx.send("✅ Meme published!")
+                    clear_session()
+                    return
+            await ctx.send("Invalid selection. Please reply again with `yes <number>`.")
+            await send_batch_for_validation(memes, ctx)
+        elif content == "no":
+            await ctx.send("Okay, fetching a new batch...")
+            await start_fetching_session(ctx, subreddit=current_subreddit)
+        elif content == "!stop":
+            await ctx.send("Session stopped, memes discarded.")
+            clear_session()
+        else:
+            await ctx.send("Invalid response. Please reply with `yes <number>`, `no`, or `!stop`.")
+            await send_batch_for_validation(memes, ctx)
+    except asyncio.TimeoutError:
+        await ctx.send("⌛ No response in time, session discarded.")
+        clear_session()
+
 async def start_fetching_session(ctx, subreddit=None):
+    global current_subreddit
+    current_subreddit = subreddit
     await reset_daily_memes()
     memes = await fetch_unique_memes(batch_size=5, subreddit=subreddit)
     if not memes:
@@ -145,7 +123,7 @@ async def start_fetching_session(ctx, subreddit=None):
 @bot.command()
 async def fetch(ctx):
     if isinstance(ctx.channel, discord.DMChannel) and ctx.author.id == OWNER_ID:
-        await ctx.send("Fetching some fresh memes for you 🧙‍♂️...")
+        await ctx.send("Fetching a fresh batch of memes for you 🧙‍♂️...")
         await start_fetching_session(ctx)
     else:
         await ctx.send("This command can only be used by the owner in DMs.")
@@ -153,7 +131,7 @@ async def fetch(ctx):
 @bot.command()
 async def fetchsub(ctx, subreddit: str):
     if isinstance(ctx.channel, discord.DMChannel) and ctx.author.id == OWNER_ID:
-        await ctx.send(f"Fetching memes from r/{subreddit} for you 🧙‍♂️...")
+        await ctx.send(f"Fetching a fresh batch from r/{subreddit} 🧙‍♂️...")
         await start_fetching_session(ctx, subreddit=subreddit)
     else:
         await ctx.send("This command can only be used by the owner in DMs.")
@@ -161,28 +139,13 @@ async def fetchsub(ctx, subreddit: str):
 @bot.command()
 async def stop(ctx):
     if isinstance(ctx.channel, discord.DMChannel) and ctx.author.id == OWNER_ID:
-        if current_wait_task and not current_wait_task.done():
-            clear_session()
-            await ctx.send("🛑 Fetching session stopped, memes discarded.")
-        else:
-            await ctx.send("No active meme fetching session to stop.")
+        clear_session()
+        await ctx.send("Fetching session stopped and memes discarded.")
     else:
         await ctx.send("This command can only be used by the owner in DMs.")
 
-@tasks.loop(minutes=1)
-async def daily_meme_fetcher():
-    tz = pytz.timezone('Europe/Paris')  # GMT+2 with daylight saving
-    now = datetime.now(tz)
-    target_time = dtime(hour=20, minute=0)  # 8 PM
-
-    if now.time().hour == target_time.hour and now.time().minute == target_time.minute:
-        owner = await bot.fetch_user(OWNER_ID)
-        await owner.send("⏰ It's 8 PM, fetching your daily memes for validation!")
-        await start_fetching_session(owner)
-
 @bot.event
 async def on_ready():
-    print(f"⚡ Ron Weasley bot ready as {bot.user}!")
-    daily_meme_fetcher.start()
+    print(f"⚡ Ron Weasley meme bot ready as {bot.user}!")
 
 bot.run(TOKEN)
