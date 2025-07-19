@@ -46,7 +46,7 @@ async def send_meme_for_validation(meme_data, ctx):
     post_link = meme_data["post_link"]
     meme_url = meme_data["url"]
 
-    await ctx.send(f"**{title}**\n{post_link}\n{meme_url}\n\nReply `yes` to publish or `no` to discard.")
+    await ctx.send(f"**{title}**\n\n{meme_url}\n\nReply `yes` to publish or `no` to discard.")
 
     def check(m):
         return m.author.id == OWNER_ID and m.channel == ctx.channel and m.content.lower() in ["yes", "no"]
@@ -55,7 +55,7 @@ async def send_meme_for_validation(meme_data, ctx):
         reply = await bot.wait_for("message", check=check, timeout=3600)
         if reply.content.lower() == "yes":
             channel = bot.get_channel(MEME_CHANNEL_ID)
-            await channel.send(f"**{title}**\n{post_link}\n{meme_url}")
+            await channel.send(f"**{title}**\n{meme_url}")
             await ctx.send("✅ Meme published to the channel!")
         else:
             await ctx.send("❌ Meme discarded.")
