@@ -172,12 +172,12 @@ async def post(ctx, *, args):
 @bot.command()
 async def help(ctx):
     help_text = (
-        "**Available Commands:**\\n"
-        "`!fetch` - Fetch a fresh batch of random memes for validation.\\n"
-        "`!fetchsub <subreddit>` - Fetch a fresh batch of memes from a specific subreddit.\\n"
-        "`!stop` - Stop the current meme fetching session.\\n"
-        "`!post <custom-title> <image-url>` - Instantly post a meme with a custom title to the meme channel.\\n"
-        "`!help` - Display this help message.\\n\\n"
+        "**Available Commands:**\n"
+        "`!fetch` - Fetch a fresh batch of random memes for validation.\n"
+        "`!fetchsub <subreddit>` - Fetch a fresh batch of memes from a specific subreddit.\n"
+        "`!stop` - Stop the current meme fetching session.\n"
+        "`!post <custom-title> <image-url>` - Instantly post a meme with a custom title to the meme channel.\n"
+        "`!help` - Display this help message.\n\n"
         "Reply with `yes <number>` to post a meme from a batch, `no` for a new batch, or `!stop` to cancel during a fetching session."
     )
     await ctx.send(help_text)
