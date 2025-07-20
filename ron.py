@@ -20,6 +20,7 @@ intents.message_content = True
 intents.dm_messages = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+bot.remove_command('help')
 sent_memes_today = set()
 current_batch = []
 current_ctx = None
