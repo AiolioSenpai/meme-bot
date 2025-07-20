@@ -24,6 +24,7 @@ current_batch = []
 current_ctx = None
 current_wait_task = None
 current_subreddit = None
+saved_memes = {}
 
 async def reset_daily_memes():
     global sent_memes_today
@@ -75,7 +76,7 @@ async def send_batch_for_validation(memes, ctx):
     desc = ""
     for idx, meme in enumerate(memes, start=1):
         desc += f"**{idx}. {meme['title']}**\n{meme['url']}\n\n"
-    await ctx.send(f"Here are some memes for today!\nReply `yes <number>` to post, `no` for new batch, or `!stop` to cancel.\n\n{desc}")
+    await ctx.send(f"Here are some memes for today!\nReply `yes <number>` to post, `no` for new batch, `!stop` to cancel, or `!save <number>` to save for later.\n\n{desc}")
 
     def check(m):
         return m.author.id == OWNER_ID and m.channel == ctx.channel
@@ -96,6 +97,20 @@ async def send_batch_for_validation(memes, ctx):
                     return
             await ctx.send("Invalid selection. Please reply again with `yes <number>`.")
             await send_batch_for_validation(memes, ctx)
+        elif content.startswith("!save"):
+            parts = content.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                choice = int(parts[1])
+                if 1 <= choice <= len(memes):
+                    saved_memes[choice] = memes[choice - 1]
+                    await ctx.send(f"✅ Meme {choice} saved for later.")
+                    await send_batch_for_validation(memes, ctx)
+                else:
+                    await ctx.send("Invalid number to save.")
+                    await send_batch_for_validation(memes, ctx)
+            else:
+                await ctx.send("Use `!save <number>`.")
+                await send_batch_for_validation(memes, ctx)
         elif content == "no":
             await ctx.send("Okay, fetching a new batch...")
             await start_fetching_session(ctx, subreddit=current_subreddit)
@@ -103,7 +118,7 @@ async def send_batch_for_validation(memes, ctx):
             await ctx.send("Session stopped, memes discarded.")
             clear_session()
         else:
-            await ctx.send("Invalid response. Please reply with `yes <number>`, `no`, or `!stop`.")
+            await ctx.send("Invalid response. Please reply with `yes <number>`, `no`, `!stop`, or `!save <number>`.")
             await send_batch_for_validation(memes, ctx)
     except asyncio.TimeoutError:
         await ctx.send("⌛ No response in time, session discarded.")
@@ -141,6 +156,27 @@ async def stop(ctx):
     if isinstance(ctx.channel, discord.DMChannel) and ctx.author.id == OWNER_ID:
         clear_session()
         await ctx.send("Fetching session stopped and memes discarded.")
+    else:
+        await ctx.send("This command can only be used by the owner in DMs.")
+
+@bot.command()
+async def post(ctx, meme_url: str):
+    if isinstance(ctx.channel, discord.DMChannel) and ctx.author.id == OWNER_ID:
+        meme = {"title": "User Provided Meme", "url": meme_url, "post_link": meme_url}
+        await send_batch_for_validation([meme], ctx)
+    else:
+        await ctx.send("This command can only be used by the owner in DMs.")
+
+@bot.command()
+async def post_saved(ctx, number: int):
+    if isinstance(ctx.channel, discord.DMChannel) and ctx.author.id == OWNER_ID:
+        if number in saved_memes:
+            meme = saved_memes.pop(number)
+            channel = bot.get_channel(MEME_CHANNEL_ID)
+            await channel.send(f"**{meme['title']}**\n{meme['url']}\n\n*Blimey, another meme for the common room!* 🧙‍♂️")
+            await ctx.send("✅ Saved meme posted!")
+        else:
+            await ctx.send("No saved meme with that number.")
     else:
         await ctx.send("This command can only be used by the owner in DMs.")
 
