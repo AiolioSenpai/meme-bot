@@ -7,6 +7,11 @@ import asyncio
 from dotenv import load_dotenv
 from datetime import datetime
 import pytz
+import asyncio
+import random
+from datetime import datetime
+
+TIMEZONE_OFFSET = 2  # adjust to match your Hogwarts time if needed
 
 # Load environment variables
 load_dotenv()
@@ -185,5 +190,34 @@ async def help(ctx):
 @bot.event
 async def on_ready():
     print(f"⚡ Ron Weasley meme bot ready as {bot.user}!")
+    bot.loop.create_task(status_loop())
+
+async def status_loop():
+    day_statuses = [
+        "🧹 Practicing Quidditch",
+        "🐭 Chasing Scabbers",
+        "🍽️ Eating at the Great Hall",
+        "🏰 Exploring Hogwarts"
+    ]
+
+    night_statuses = [
+        "🌙 Dreaming of the Chudley Cannons",
+        "💤 Sleeping in the Gryffindor Tower",
+        "✨ Watching the stars from the Astronomy Tower"
+    ]
+
+    while True:
+        hour_utc = datetime.utcnow().hour
+        local_hour = (hour_utc + TIMEZONE_OFFSET) % 24
+
+        if 6 <= local_hour < 22:
+            status_message = random.choice(day_statuses)
+        else:
+            status_message = random.choice(night_statuses)
+
+        activity = discord.Game(status_message)
+        await bot.change_presence(activity=activity)
+
+        await asyncio.sleep(7200)  # update every 2 hours
 
 bot.run(TOKEN)
